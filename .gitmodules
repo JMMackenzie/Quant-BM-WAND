@@ -1,10 +1,10 @@
 [submodule "external/fastpfor"]
 	path = external/fastpfor
-	url = https://github.com/lemire/FastPFor
+	url = http://github.com/lemire/fastpfor/
 	branch = 743ff20
 [submodule "external/sdsl-lite"]
 	path = external/sdsl-lite
-	url = https://github.com/simongog/sdsl-lite
+	url = http://github.com/simongog/sdsl-lite/
 [submodule "external/atire"]
 	path = external/atire
-	url = https://github.com/snapbug/atire/
+	url = http://github.com/snapbug/atire/
