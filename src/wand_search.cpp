@@ -24,7 +24,6 @@ typedef struct cmdargs {
     double theta;
 } cmdargs_t;
 
-
 void print_usage(std::string program) {
   std::cerr << program << " -c <collection>"
                        << " -q <query_file>"
