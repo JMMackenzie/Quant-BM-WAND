@@ -44,19 +44,19 @@ class plist_iterator
     bool operator !=(const plist_iterator& b) const;
     uint64_t docid() const;
     uint64_t freq() const;
-    void skip_to_id(uint64_t id);
-    void skip_to_block_with_id(uint64_t id);
+    void skip_to_id(const uint64_t id);
+    void skip_to_block_with_id(const uint64_t id);
     uint64_t block_max() const;
-    uint64_t block_max(uint64_t id) const {
+    uint64_t block_max(const uint64_t id) const {
       return m_plist_ptr->m_block_maximums[id];
     }
     uint64_t block_rep() const { 
       return m_plist_ptr->block_rep(m_cur_block_id); 
     }
-    uint64_t block_rep(uint64_t id) const {
+    uint64_t block_rep(const uint64_t id) const {
       return m_plist_ptr->block_rep(id);
     }
-    const uint64_t block_containing_id(uint64_t id);
+    const uint64_t block_containing_id(const uint64_t id);
     uint64_t num_blocks() const {
       return m_plist_ptr->num_blocks();
     }
@@ -292,7 +292,7 @@ public: // constructors
 	  }
   public: // functions used during processing
 	  
-    void decompress_block(size_t block_id,
+    void decompress_block(const size_t block_id,
 	            					  pfor_data_type& id_data,
 						              pfor_data_type& freq_data) const
 	{
@@ -334,7 +334,7 @@ public: // constructors
 		fc.decodeArray(freq_start, m_block_data[block_id].freq_bytes, freq_data.data(), block_size);
 	}
 
-	  size_type find_block_with_id(uint64_t id,size_t start_block) const {
+	  size_type find_block_with_id(const uint64_t id, const size_t start_block) const {
 	    size_t block_id = start_block;
 	    size_t nblocks = m_block_data.size();
 	    while (block_id < nblocks && m_block_data[block_id].max_block_id < id) {
@@ -347,7 +347,7 @@ public: // constructors
 		  return m_size;
 	  }
 
-	  uint64_t block_rep(size_t bid) const {
+	  uint64_t block_rep(const size_t bid) const {
 		  return m_block_data[bid].max_block_id;
 	  }
 
@@ -355,7 +355,7 @@ public: // constructors
 		  return m_block_data.size();
 	  }
 
-	  size_type postings_in_block(size_type block_id) const {
+	  size_type postings_in_block(const size_type block_id) const {
 		  size_type block_size = t_block_size;
 		  size_type mod = m_size % t_block_size;
 		  if (block_id == m_block_data.size()-1 && mod != 0) {
@@ -573,12 +573,14 @@ void plist_iterator<t_bs>::access_and_decode_cur_pos() const
 }
 
 template<uint64_t t_bs>
-const uint64_t plist_iterator<t_bs>::block_containing_id(uint64_t id) {
-  return m_plist_ptr->find_block_with_id(id, m_cur_block_id);
+const uint64_t plist_iterator<t_bs>::block_containing_id(const uint64_t id) {
+  size_t block = m_plist_ptr->find_block_with_id(id, m_cur_block_id);
+  m_cur_block_id = block;
+  return block;
 } 
 
 template<uint64_t t_bs>
-void plist_iterator<t_bs>::skip_to_block_with_id(uint64_t id)
+void plist_iterator<t_bs>::skip_to_block_with_id(const uint64_t id)
 {
   size_t old_block = m_cur_block_id;
   m_cur_block_id = m_plist_ptr->find_block_with_id(id,m_cur_block_id);
@@ -593,7 +595,7 @@ void plist_iterator<t_bs>::skip_to_block_with_id(uint64_t id)
 }
 
 template<uint64_t t_bs>
-void plist_iterator<t_bs>::skip_to_id(uint64_t id)
+void plist_iterator<t_bs>::skip_to_id(const uint64_t id)
 {
   if (id == m_cur_docid) {
     return;
