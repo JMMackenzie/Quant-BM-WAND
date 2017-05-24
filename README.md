@@ -67,4 +67,5 @@ The instructions and code for the JASS engine can be found on [Github](https://g
 
 Updates
 =======
-* 24/5/2017: Added support for conjunctive Wand/Block-Max AND querying.
+* 24/5/2017: Added support for conjunctive Wand/Block-Max AND querying. Please
+note that BM-AND is currently untested.
