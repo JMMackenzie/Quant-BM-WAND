@@ -19,6 +19,12 @@ enum index_form {
   BMW
 };
 
+enum query_traversal {
+  AND,
+  OR,
+  UNKNOWN
+};
+
 
 char *ATIRE_DOCUMENT_FILE_START = "~documentfilenamesstart";
 char *ATIRE_DOCUMENT_FILE_END = "~documentfilenamesfinish";

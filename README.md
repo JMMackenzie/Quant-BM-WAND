@@ -54,12 +54,17 @@ Running queries
 Running queries should also be simple. We have provided some query files in
 the `ir-repo/` directory.
 
-`./bin/wand_search -c <collection> -k <no. results> -q <query_file> -o <output_prefix>`
+`./bin/wand_search -c <collection> -k <no. results> -q <query_file> -o <output_prefix> -t <traversal strategy: AND|OR>`
 - collection corresponds to the index built above (output_index_directory)
 - `<output prefix>`: Two files will be output: `*-time.log` and `*-trec.run`.
 The `*-trec.run` file is directly usable with `trec_eval`.
 - `-z` specifies the aggression parameter: A float between 1.0 and infinity.
+- `-t` specifies whether you want conjunctive or disjunctive processing. If you have a block-max index and use -t AND, this will run block-max AND (and so on).
 
 JASS
 ====
 The instructions and code for the JASS engine can be found on [Github](https://github.com/lintool/JASS)
+
+Updates
+=======
+* 24/5/2017: Added support for conjunctive Wand/Block-Max AND querying.

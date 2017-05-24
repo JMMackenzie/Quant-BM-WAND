@@ -25,29 +25,25 @@ struct doc_score {
 
 struct result {
   std::vector<doc_score> list;
+  uint64_t qry_id = 0;
   uint64_t wt_search_space = 0;
   uint64_t wt_nodes = 0;
-  uint64_t postings_evaluated = 0;
-  uint64_t postings_total = 0;
+  uint64_t postings_evaluated = 0; // Sum calls to "evaluate_pivot"
+  uint64_t postings_total = 0; // Sum of lengths of postings lists from query
   uint64_t docs_fully_evaluated = 0;
-  uint64_t docs_added_to_heap = 0;
-  double final_threshold = 0;
+  uint64_t docs_added_to_heap = 0; 
+  double final_threshold = 0; // Final top-k heap threshold
 };
 
 struct query_token{
-    std::vector<uint64_t> token_ids;
-    std::vector<std::string> token_strs;
-	uint64_t f_qt;
-	query_token(const std::vector<uint64_t>& ids,
-              const std::vector<std::string>& strs,
-              uint64_t f) : token_ids(ids), token_strs(strs), f_qt(f) 
+    uint64_t token_id;
+    std::string token_str;
+    uint64_t f_qt;
+	query_token(const uint64_t id,
+              const std::string str,
+              uint64_t f) : token_id(id), token_str(str), 
+              f_qt(f) 
     {
-    }
-    bool operator<(const query_token& qt) const {
-        return std::lexicographical_compare(token_ids.begin(), 
-                                            token_ids.end(),
-                                            qt.token_ids.begin(), 
-                                            qt.token_ids.end());
     }
 };
 
@@ -118,7 +114,8 @@ struct query_parser {
     }
 
     static std::pair<bool,query_t> parse_query(const mapping_t& mapping,
-                const std::string& query_str,bool only_complete = false,bool integers = false)
+                const std::string& query_str,
+                bool only_complete = false,bool integers = false)
     {
 
         const auto& id_mapping = mapping.first;
@@ -128,25 +125,25 @@ struct query_parser {
 
         bool parse_ok = std::get<0>(mapped_qry);
         auto qry_id = std::get<1>(mapped_qry);
+        
         if(parse_ok) {
             std::unordered_map<uint64_t,uint64_t> qry_set;
-            const auto& qids = std::get<2>(mapped_qry);
-            for(const auto& qid : qids) {
-                qry_set[qid] += 1;
+            const auto& tids = std::get<2>(mapped_qry);
+            for(const auto& tid : tids) {
+                qry_set[tid] += 1;
             }
             std::vector<query_token> query_tokens;
+            size_t index = 0;
             for(const auto& qry_tok : qry_set) {
-                std::vector<uint64_t> term;
-                term.push_back(qry_tok.first);
-                auto rmitr = reverse_mapping.find(qry_tok.first);
-                std::vector<std::string> term_str;
+                uint64_t term = qry_tok.first;
+                auto rmitr = reverse_mapping.find(term);
+                std::string term_str;
                 if(rmitr != reverse_mapping.end()) {
-                    std::string qry_str = rmitr->second;
-                    term_str.push_back(qry_str);
+                    term_str = rmitr->second;
                 }
                 query_tokens.emplace_back(term,term_str,qry_tok.second);
+                ++index;
             }
-            std::sort(query_tokens.begin(),query_tokens.end()); // sort
             query_t q(qry_id,query_tokens);
             return {true,q};
         }
@@ -157,13 +154,12 @@ struct query_parser {
     }
 
     static std::vector<query_t> parse_queries(const std::string& collection_dir,
-                                            const std::string& query_file,bool only_complete = false) 
-    {
+                                              const std::string& query_file,
+                                              bool only_complete = false) {
         std::vector<query_t> queries;
 
         /* load the mapping */
         auto mapping = load_dictionary(collection_dir);
-
         /* parse queries */
         std::ifstream qfs(query_file); 
         if(!qfs.is_open()) {
@@ -173,7 +169,7 @@ struct query_parser {
 
         std::string query_str;
         while( std::getline(qfs,query_str) ) {
-            auto parsed_qry = parse_query(mapping,query_str,only_complete);
+            auto parsed_qry = parse_query(mapping,query_str);
             if(parsed_qry.first) {
                 queries.emplace_back(parsed_qry.second);
             }

@@ -11,7 +11,7 @@
 #include "invidx.hpp"
 #include "impact.hpp"
 #include "util.hpp"
-    
+
 typedef struct cmdargs {
     std::string collection_dir;
     std::string query_file;
@@ -21,15 +21,23 @@ typedef struct cmdargs {
     std::string output_prefix;
     std::string index_type_file;
     uint64_t k;
-    double theta;
+    double F_boost;
+    query_traversal traversal;
+    std::string traversal_string;
 } cmdargs_t;
 
 void print_usage(std::string program) {
   std::cerr << program << " -c <collection>"
                        << " -q <query_file>"
                        << " -k <no. items to retrieve>"
-                       << " -z <theta: aggression parameter. 1.0 is rank-safe>"
+                       << " -z <F: aggression parameter. 1.0 is rank-safe>"
                        << " -o <output file handle>"
+                       << " -t <traversal type: AND|OR>"
+                       << std::endl
+                       << "Note that if using a WAND index, -t AND will run"
+                       << " WAND in conjunctive mode, and -t OR will run WAND"
+                       << " in disjunctive mode. Additionally, a BMW index with"
+                       << " -t AND will run Block-Max AND."
                        << std::endl;
   exit(EXIT_FAILURE);
 }
@@ -41,8 +49,10 @@ parse_args(int argc, char* const argv[])
   int op;
   args.collection_dir = "";
   args.output_prefix = "wand";
+  args.traversal = UNKNOWN;
+  args.traversal_string = "";
   args.k = 10;
-  args.theta = 1.0;
+  args.F_boost = 1.0;
   while ((op=getopt(argc,argv,"c:q:k:z:o:")) != -1) {
     switch (op) {
       case 'c':
@@ -61,15 +71,24 @@ parse_args(int argc, char* const argv[])
       case 'k':
         args.k = std::strtoul(optarg,NULL,10);
         break;
-     case 'z':
-        args.theta = atof(optarg);
+      case 'z':
+        args.F_boost = atof(optarg);
+        break;
+     case 't':
+        args.traversal_string = optarg;
+        if (args.traversal_string == "OR")
+          args.traversal = OR;
+        else if (args.traversal_string == "AND")
+          args.traversal = AND;
+        else 
+          print_usage(argv[0]);
         break;
       case '?':
       default:
         print_usage(argv[0]);
     }
   }
-  if (args.collection_dir=="" || args.query_file=="" || args.theta < 1) {
+  if (args.collection_dir=="" || args.query_file=="" || args.F_boost < 1) {
     std::cerr << "Missing/Incorrect command line parameters.\n";
     print_usage(argv[0]);
   }
@@ -87,7 +106,7 @@ main (int argc,char* const argv[])
   /* parse command line */
   cmdargs_t args = parse_args(argc,argv);
 
-  std::cerr << "NOTE: Theta = " << args.theta << std::endl;
+  std::cerr << "NOTE: Theta = " << args.F_boost << std::endl;
 
   std::ifstream read_type(args.index_type_file);
   std::string type;
@@ -113,7 +132,7 @@ main (int argc,char* const argv[])
   my_index_t index;
   auto load_start = clock::now();
   // Construct index instance.
-  construct(index, args.postings_file, args.theta);
+  construct(index, args.postings_file, args.F_boost);
   auto load_stop = clock::now();
   auto load_time_sec = std::chrono::duration_cast<std::chrono::seconds>(load_stop-load_start);
   std::cout << "Index loaded in " << load_time_sec.count() << " seconds." << std::endl;
@@ -135,7 +154,7 @@ main (int argc,char* const argv[])
 
       // run the query
       auto qry_start = clock::now();
-      auto results = index.search(qry_tokens,args.k, t_index_type);
+      auto results = index.search(qry_tokens,args.k, t_index_type, args.traversal);
       auto qry_stop = clock::now();
 
       auto query_time = std::chrono::duration_cast<std::chrono::microseconds>(qry_stop-qry_start);
@@ -157,14 +176,20 @@ main (int argc,char* const argv[])
     }
   }
 
-  /* output results to csv */
   std::string search_type;
   if (t_index_type == WAND)
     search_type = "wand";
   else
     search_type = "bmw";
 
-  /* calc average */
+  // generate output string
+  args.output_prefix = args.output_prefix + "-"
+                       + search_type + "-" 
+                       + args.traversal_string + "-"
+                       + std::to_string(args.k) + "-" 
+                       + std::to_string(args.F_boost);
+
+  // Average the times
   for(auto& timing : query_times) {
     timing.second = timing.second / num_runs;
   }
