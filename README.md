@@ -69,3 +69,4 @@ Updates
 =======
 * 24/5/2017: Added support for conjunctive Wand/Block-Max AND querying. Please
 note that BM-AND is currently untested.
+* 26/5/2017: Fix added for Block-Max AND. BMA tested and working as expected.
