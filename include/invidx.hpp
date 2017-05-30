@@ -538,9 +538,11 @@ public:
     sort_list_by_id(postings_lists);
     auto pivot_and_score = determine_candidate(postings_lists);
     auto pivot_list = std::get<0>(pivot_and_score);
+    size_t initial = postings_lists.size();
 
     // While we have got documents left to evaluate
-    while (pivot_list != postings_lists.end()) {
+    while (pivot_list != postings_lists.end() &&
+                         postings_lists.size() == initial) {
       uint64_t candidate_id = (*pivot_list)->cur.docid();
       // Second level candidate check
       auto candidate_and_score = potential_candidate(postings_lists, pivot_list,
@@ -565,8 +567,7 @@ public:
         forward_lists_bmw(postings_lists,pivot_list,candidate_id); 
       }
       // Grab a new pivot and keep going!
-      pivot_and_score = determine_candidate(postings_lists,
-                                            threshold);
+      pivot_and_score = determine_candidate(postings_lists);
       pivot_list = std::get<0>(pivot_and_score);
       potential_score = std::get<1>(pivot_and_score);
       
