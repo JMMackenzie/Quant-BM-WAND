@@ -13,14 +13,14 @@
 
 struct doc_score {
 	uint64_t doc_id;
-	uint64_t score;
+	double score;
   bool operator>(const doc_score& rhs) const {
   	if(score == rhs.score)
     	return doc_id > rhs.doc_id;
       return score > rhs.score;
     }
   doc_score() {};
-  doc_score(uint64_t did,uint64_t s) : doc_id(did) , score(s) {};
+  doc_score(uint64_t did, double s) : doc_id(did) , score(s) {};
 };
 
 struct result {

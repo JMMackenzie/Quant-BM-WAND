@@ -1,5 +1,5 @@
-#ifndef BLOCK_POSTINGS_LIST_H
-#define BLOCK_POSTINGS_LIST_H
+#ifndef _BLOCK_POSTINGS_LIST_H
+#define _BLOCK_POSTINGS_LIST_H
 
 #include <limits>
 #include <stdexcept>
@@ -13,13 +13,14 @@
 #include "bitpacking.h"
 #include "simdfastpfor.h"
 #include "deltautil.h"
-
 #include "compress_qmx.h"
 
 #include "sdsl/int_vector.hpp"
+#include "generic_rank.hpp"
+#include "bm25.hpp"
+#include "impact.hpp"
 
 using namespace sdsl;
-
 
 template<uint64_t t_block_size>
 class block_postings_list;
@@ -46,8 +47,8 @@ class plist_iterator
     uint64_t freq() const;
     void skip_to_id(const uint64_t id);
     void skip_to_block_with_id(const uint64_t id);
-    uint64_t block_max() const;
-    uint64_t block_max(const uint64_t id) const {
+    double block_max() const;
+    double block_max(const uint64_t id) const {
       return m_plist_ptr->m_block_maximums[id];
     }
     uint64_t block_rep() const { 
@@ -100,16 +101,16 @@ class block_postings_list {
 	  #pragma pack(pop)
   public: // actual data
 	  uint64_t m_size = 0;
-	  uint64_t m_list_maximum = std::numeric_limits<uint64_t>::lowest();
+	  double m_list_maximum = std::numeric_limits<double>::lowest();
 	  std::vector<block_data> m_block_data;
     pfor_data_type m_docid_data;
     pfor_data_type m_freq_data;
-    std::vector<uint64_t> m_block_maximums;
+    std::vector<double> m_block_maximums;
   public: // default 
     block_postings_list() {
     	m_block_data.resize(1);
     }
-    uint64_t block_max(uint64_t bid) const {
+    const double block_max(const uint64_t bid) const {
       return m_block_maximums[bid];
     }
 
@@ -117,15 +118,16 @@ class block_postings_list {
     block_postings_list(block_postings_list&& pl) = default;
     block_postings_list& operator=(const block_postings_list& pi) = default;
     block_postings_list& operator=(block_postings_list&& pi) = default;
-    uint64_t list_max_score() const { return m_list_maximum; };
+    const double list_max_score() const { return m_list_maximum; };
 public: // constructors
     block_postings_list(std::istream& in) {
       load(in);
     }
 
  
-    block_postings_list(std::vector<std::pair<uint64_t,uint64_t>>& pre_sorted_data,
-                       index_form index_type) {
+    block_postings_list(const std::unique_ptr<generic_rank> &ranker,
+                        std::vector<std::pair<uint64_t,uint64_t>>& pre_sorted_data,
+                        index_form index_type) {
 
     	m_size = pre_sorted_data.size();
 
@@ -137,24 +139,21 @@ public: // constructors
 	        tmp_freq[i] = pre_sorted_data[i].second;
 	    }
 
-	    // create block max structure first
+      // Generic
 	    create_block_support(tmp_data);
-
-  
-	    // create rank support structure
-	
+        
       if (index_type == BMW) {
         // BMW specific
-        create_rank_support_bmw(tmp_data,tmp_freq);
+        create_rank_support_bmw(tmp_data,tmp_freq, ranker);
       }
       else {
         // Wand specific
-        create_rank_support_wand(tmp_data,tmp_freq);
+        create_rank_support_wand(tmp_data,tmp_freq, ranker);
       }
 
 	    // compress postings
 	    compress_postings_data(tmp_data,tmp_freq);
-    }
+   }
   
   private: // functions used during construction
 	  void create_block_support(const sdsl::int_vector<32>& ids)
@@ -172,17 +171,20 @@ public: // constructors
 	  }
 
 	  void create_rank_support_wand(const sdsl::int_vector<32>& ids,
-							               const sdsl::int_vector<32>& freqs)
+							               const sdsl::int_vector<32>& freqs,
+                             const std::unique_ptr<generic_rank>& ranker)
 	  {
 		  auto F_t = std::accumulate(freqs.begin(),freqs.end(),0);
-		  auto f_t = ids.size();
+		  uint64_t f_t = ids.size();
       
-      uint64_t max_score = 0;
-      m_list_maximum = std::numeric_limits<uint64_t>::lowest();
+      double max_score = 0;
+      m_list_maximum = std::numeric_limits<double>::lowest();
   
 	    for (size_t l=0; l<ids.size(); l++) {
-	      auto id = ids[l];
-	      uint64_t score = freqs[l];
+	      uint64_t id = ids[l];
+	      uint64_t f_dt = freqs[l];
+        double W_d = ranker->doc_length(id);
+        double score = ranker->calculate_docscore(f_dt, f_t, W_d);
 	      max_score = std::max(max_score, score);
       }
       m_list_maximum = std::max(m_list_maximum, max_score);
@@ -190,7 +192,8 @@ public: // constructors
 
 
 	  void create_rank_support_bmw(const sdsl::int_vector<32>& ids,
-							               const sdsl::int_vector<32>& freqs)
+							               const sdsl::int_vector<32>& freqs,
+                             const std::unique_ptr<generic_rank>& ranker)
 	  {
 		  auto F_t = std::accumulate(freqs.begin(),freqs.end(),0);
 		  auto f_t = ids.size();
@@ -200,21 +203,23 @@ public: // constructors
         num_blocks++;
 
       m_block_maximums.resize(num_blocks);
-      uint64_t max_score = 0;
-      m_list_maximum = std::numeric_limits<uint64_t>::lowest();
+      double max_score = 0;
+      m_list_maximum = std::numeric_limits<double>::lowest();
       size_t i = 1;
       size_t j = 0;
   
 	    for (size_t l=0; l<ids.size(); l++) {
 	      auto id = ids[l];
-	      uint64_t score = freqs[l];
+	      uint64_t f_dt = freqs[l];
+        double W_d = ranker->doc_length(id);
+        double score = ranker->calculate_docscore(f_dt, f_t, W_d);
 	      max_score = std::max(max_score, score);
         //Block max support
         if(i % t_block_size == 0){
           m_block_maximums[j] = max_score;
           m_list_maximum = std::max(m_list_maximum, max_score);
           i = 0;
-          max_score = 0;
+          max_score = 0.0f;
           j++;
         }
         i++;
@@ -431,15 +436,15 @@ public: // constructors
       auto *bm_c = sdsl::structure_tree::add_child(child, "blockmax", 
                                                                     "blockmax");
       auto *bmm_c = sdsl::structure_tree::add_child(bm_c, "block maximums",
-                                   "uint64_t");
+                                   "double");
       size_type bm_written_bytes = sdsl::write_member(m_block_maximums.size(), 
                                   out, bm_c, "num max_scores");
 
       out.write((const char *)m_block_maximums.data(), 
-                                      m_block_maximums.size() * sizeof(uint64_t));
-      bm_written_bytes += m_block_maximums.size() * sizeof(uint64_t);
+                                      m_block_maximums.size() * sizeof(double));
+      bm_written_bytes += m_block_maximums.size() * sizeof(double);
       sdsl::structure_tree::add_size(bmm_c, 
-                                   m_block_maximums.size() * sizeof(uint64_t));
+                                   m_block_maximums.size() * sizeof(double));
       sdsl::structure_tree::add_size(bm_c, bm_written_bytes);
       written_bytes += bm_written_bytes; 
       
@@ -484,7 +489,7 @@ public: // constructors
       read_member(num_block_max_scores, in);
       m_block_maximums.resize(num_block_max_scores);
       in.read((char *)m_block_maximums.data(), 
-                                         num_block_max_scores * sizeof(uint64_t));
+                                         num_block_max_scores * sizeof(double));
 
       read_member(m_list_maximum,in);
 	}
@@ -539,7 +544,7 @@ typename plist_iterator<t_bs>::value_type plist_iterator<t_bs>::docid() const
 }
 
 template<uint64_t t_bs>
-uint64_t plist_iterator<t_bs>::block_max() const 
+double plist_iterator<t_bs>::block_max() const 
 {
   return m_plist_ptr->block_max(m_cur_block_id);
 }

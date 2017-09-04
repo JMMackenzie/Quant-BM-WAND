@@ -9,7 +9,9 @@
 #include <unistd.h>
 #include "query.hpp"
 #include "invidx.hpp"
+#include "generic_rank.hpp"
 #include "impact.hpp"
+#include "bm25.hpp"
 #include "util.hpp"
 
 typedef struct cmdargs {
@@ -33,11 +35,6 @@ void print_usage(std::string program) {
                        << " -z <F: aggression parameter. 1.0 is rank-safe>"
                        << " -o <output file handle>"
                        << " -t <traversal type: AND|OR>"
-                       << std::endl
-                       << "Note that if using a WAND index, -t AND will run"
-                       << " WAND in conjunctive mode, and -t OR will run WAND"
-                       << " in disjunctive mode. Additionally, a BMW index with"
-                       << " -t AND will run Block-Max AND."
                        << std::endl;
   exit(EXIT_FAILURE);
 }
@@ -48,12 +45,12 @@ parse_args(int argc, char* const argv[])
   cmdargs_t args;
   int op;
   args.collection_dir = "";
-  args.output_prefix = "wand";
+  args.output_prefix = "";
   args.traversal = UNKNOWN;
   args.traversal_string = "";
   args.k = 10;
   args.F_boost = 1.0;
-  while ((op=getopt(argc,argv,"c:q:k:z:o:")) != -1) {
+  while ((op=getopt(argc,argv,"c:q:k:z:o:t:")) != -1) {
     switch (op) {
       case 'c':
         args.collection_dir = optarg;
@@ -74,7 +71,7 @@ parse_args(int argc, char* const argv[])
       case 'z':
         args.F_boost = atof(optarg);
         break;
-     case 't':
+      case 't':
         args.traversal_string = optarg;
         if (args.traversal_string == "OR")
           args.traversal = OR;
@@ -88,7 +85,8 @@ parse_args(int argc, char* const argv[])
         print_usage(argv[0]);
     }
   }
-  if (args.collection_dir=="" || args.query_file=="" || args.F_boost < 1) {
+  if (args.collection_dir=="" || args.query_file=="" || args.F_boost < 1 ||
+      args.traversal == UNKNOWN) {
     std::cerr << "Missing/Incorrect command line parameters.\n";
     print_usage(argv[0]);
   }
@@ -100,26 +98,44 @@ main (int argc,char* const argv[])
 {
   /* define types */
   using plist_type = block_postings_list<128>;
-  using my_index_t = idx_invfile<plist_type, my_rank_impact>;
+  using my_index_t = idx_invfile<plist_type, generic_rank>;
   using clock = std::chrono::high_resolution_clock;
 
   /* parse command line */
   cmdargs_t args = parse_args(argc,argv);
 
-  std::cerr << "NOTE: Theta = " << args.F_boost << std::endl;
+  std::cerr << "NOTE: Global F boost = " << args.F_boost << std::endl;
 
+  // Read the index and traversal type
   std::ifstream read_type(args.index_type_file);
-  std::string type;
-  read_type >> type;
+  std::string t_traversal, t_postings;
+  read_type >> t_traversal;
+  read_type >> t_postings;
+  
+  // Wand or BMW index? 
   index_form t_index_type;
-  if (type == "WAND")
+  if (t_traversal == STRING_WAND)
     t_index_type = WAND;
-  else if (type == "BMW")
+  else if (t_traversal == STRING_BMW)
     t_index_type = BMW;
   else {
     std::cerr << "Index is corrupted. Please rebuild." << std::endl;
     exit(EXIT_FAILURE);
   }
+
+  // TF or a quant index?
+  postings_form t_postings_type;
+  if (t_postings == STRING_FREQ) {
+    t_postings_type = FREQUENCY;
+  }
+  else if (t_postings == STRING_QUANT) {
+    t_postings_type = QUANTIZED;
+  }
+  else {
+    std::cerr << "Index is corrupted. Please rebuild." << std::endl;
+    exit(EXIT_FAILURE);
+  }
+
  
   /* parse queries */
   std::cout << "Parsing query file '" << args.query_file << "'" << std::endl;
@@ -130,9 +146,34 @@ main (int argc,char* const argv[])
 
   /* load the index */
   my_index_t index;
+ 
   auto load_start = clock::now();
   // Construct index instance.
   construct(index, args.postings_file, args.F_boost);
+
+  // Prepare Ranker
+  uint64_t temp;
+  std::vector<uint64_t>doc_lens;
+  ifstream doclen_file(args.doclen_file);
+  if(!doclen_file.is_open()){
+    std::cerr << "Couldn't open: " << args.doclen_file << std::endl;
+    exit(EXIT_FAILURE);
+  }
+  std::cout << "Reading document lengths." << std::endl;
+  /*Read the lengths of each document from asc file into vector*/
+  while(doclen_file >> temp){
+    doc_lens.push_back(temp);
+  }
+  ifstream global_file(args.global_file);
+  if(!global_file.is_open()) {
+    std::cerr << "Couldn't open: " << args.global_file << std::endl;
+    exit(EXIT_FAILURE);
+  } 
+  // Load the ranker
+  uint64_t total_docs, total_terms;
+  global_file >> total_docs >> total_terms;
+  index.load(doc_lens, total_terms, total_docs, t_postings_type);
+
   auto load_stop = clock::now();
   auto load_time_sec = std::chrono::duration_cast<std::chrono::seconds>(load_stop-load_start);
   std::cout << "Index loaded in " << load_time_sec.count() << " seconds." << std::endl;
@@ -142,7 +183,7 @@ main (int argc,char* const argv[])
   std::map<uint64_t,result> query_results;
   std::map<uint64_t,uint64_t> query_lengths;
 
-  size_t num_runs = 10;
+  size_t num_runs = 3;
   std::cerr << "Times are the average across " << num_runs << " runs." << std::endl;
   for(size_t i = 0; i < num_runs; i++) {
     // For each query
@@ -176,17 +217,13 @@ main (int argc,char* const argv[])
     }
   }
 
-  std::string search_type;
-  if (t_index_type == WAND)
-    search_type = "wand";
-  else
-    search_type = "bmw";
 
   // generate output string
-  args.output_prefix = args.output_prefix + "-"
-                       + search_type + "-" 
-                       + args.traversal_string + "-"
-                       + std::to_string(args.k) + "-" 
+  args.output_prefix = args.output_prefix + "-" // user specified
+                       + t_postings + "-"  // quantized or frequency
+                       + t_traversal + "-" // wand or bmw 
+                       + args.traversal_string + "-" // OR, AND, etc
+                       + std::to_string(args.k) + "-" // no. results
                        + std::to_string(args.F_boost);
 
   // Average the times
@@ -212,7 +249,7 @@ main (int argc,char* const argv[])
             << results.final_threshold << ";" 
             << query_lengths[qry_id] << ";" 
             << qry_time.count() / 1000.0 << ";"
-            << search_type << std::endl;
+            << args.traversal_string << std::endl;
     }
   } else {
     perror ("Could not output results to file.");

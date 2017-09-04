@@ -45,16 +45,22 @@ Index building
 --------------
 Building an index is simple:
 
-`./bin/mk_impact_idx -findex <atire_index> <output_index_directory> <type>`
+`./bin/build_index -findex <atire_index> <output_index_directory> <type>`
 
 Type can either be `BMW` or `WAND`.
+
+Important: Now that frequency indexes are supported, the type of index that will be output by
+the `build_index` binary will depend on the type of ATIRE index in which you pass in. For example,
+if you build a frequency index in ATIRE, `build_index` will automatically deduce this and thus
+build a tf index for `WAND` or `BMW`. Take a look at `run_gov2.sh` for specific examples on
+how to build a frequency/quantized ATIRE index.
 
 Running queries
 ---------------
 Running queries should also be simple. We have provided some query files in
 the `ir-repo/` directory.
 
-`./bin/wand_search -c <collection> -k <no. results> -q <query_file> -o <output_prefix> -t <traversal strategy: AND|OR>`
+`./bin/search_index -c <collection> -k <no. results> -q <query_file> -o <output_prefix> -t <traversal strategy: AND|OR>`
 - collection corresponds to the index built above (output_index_directory)
 - `<output prefix>`: Two files will be output: `*-time.log` and `*-trec.run`.
 The `*-trec.run` file is directly usable with `trec_eval`.
@@ -70,3 +76,4 @@ Updates
 * 24/5/2017: Added support for conjunctive Wand/Block-Max AND querying. Please
 note that BM-AND is currently untested.
 * 26/5/2017: Fix added for Block-Max AND. BMA tested and working as expected.
+* 04/9/2017: Support added for frequency indexes

@@ -8,12 +8,14 @@
 #include "sdsl/int_vector.hpp"
 #include "block_postings_list.hpp"
 #include "util.hpp"
+#include "generic_rank.hpp"
+#include "bm25.hpp"
 #include "impact.hpp"
 
 using namespace sdsl;
 
 template<class t_pl = block_postings_list<128>,
-         class t_rank = my_rank_impact>
+         class t_rank = generic_rank>
 class idx_invfile {
 public:
   using size_type = sdsl::int_vector<>::size_type;
@@ -24,9 +26,11 @@ private:
   struct plist_wrapper {
     typename plist_type::const_iterator cur;
     typename plist_type::const_iterator end;
-    uint64_t list_max_score;
+    double list_max_score;
+    double f_t;
     plist_wrapper() = default;
     plist_wrapper(plist_type& pl) {
+      f_t = pl.size(); 
       cur = pl.begin();
       end = pl.end();
       list_max_score = pl.list_max_score();
@@ -34,7 +38,7 @@ private:
   };
 private:
   std::vector<plist_type> m_postings_lists;
-  ranker_type ranker;
+  std::unique_ptr<ranker_type> ranker;
 
 public:
   idx_invfile() = default;
@@ -72,6 +76,17 @@ public:
     }
     structure_tree::add_size(child, written_bytes);
     return written_bytes;
+  }
+
+  // Loads the ranker data
+  void load(std::vector<uint64_t> doc_len, uint64_t terms, uint64_t num_docs,
+            postings_form postings_type){
+    if (postings_type == FREQUENCY) {
+      ranker = std::unique_ptr<ranker_type>(new rank_bm25(doc_len, terms, num_docs));
+    }
+    else if (postings_type == QUANTIZED) {
+      ranker = std::unique_ptr<ranker_type>(new rank_impact);
+    }
   }
 
   // Finds the posting with the least number of items remaining other than
@@ -194,14 +209,14 @@ public:
   // Block-Max specific candidate test. Tests that the current pivot's block-max
   // scores still exceed the heap threshold. Returns the block-max score sum and
   // a boolean (whether we should indeed score, or not)
-  const std::pair<bool, uint64_t> 
+  const std::pair<bool, double> 
   potential_candidate(std::vector<plist_wrapper*>& postings_lists,
                       const typename std::vector<plist_wrapper*>::iterator& 
-                      pivot_list, const uint64_t threshold, 
+                      pivot_list, const double threshold, 
                       const uint64_t doc_id){
 
     auto iter = postings_lists.begin();
-    uint64_t block_max_score = (*pivot_list)->cur.block_max(); // pivot blockmax
+    double block_max_score = (*pivot_list)->cur.block_max(); // pivot blockmax
 
     // Lists preceding pivot list block max scores
     while (iter != pivot_list) {
@@ -219,7 +234,7 @@ public:
 
   // Returns a pivot document and its candidate (UB estimated) score.
   // Conjunctive pivot selection, can be used by BMW and Wand algos
-  std::pair<typename std::vector<plist_wrapper*>::iterator, uint64_t>
+  std::pair<typename std::vector<plist_wrapper*>::iterator, double>
   determine_candidate(std::vector<plist_wrapper*>& postings_lists) {
     // Return the doc in the last list since it's furtherest along (and
     // the only doc that may contain ALL terms). Also return our
@@ -229,12 +244,12 @@ public:
 
   // Returns a pivot document and its candidate (UB estimated) score.
   // For disjunctive processing, can be used by BMW and Wand algos.
-  std::pair<typename std::vector<plist_wrapper*>::iterator, uint64_t>
+  std::pair<typename std::vector<plist_wrapper*>::iterator, double>
   determine_candidate(std::vector<plist_wrapper*>& postings_lists,
                       double threshold) {
 
     threshold = threshold * m_F; //Theta push
-    uint64_t score = 0;
+    double score = 0;
     auto itr = postings_lists.begin();
     auto end = postings_lists.end();
     while(itr != end) {
@@ -256,23 +271,26 @@ public:
   }
 
   // Evaluates the pivot document
-  uint64_t evaluate_pivot(std::vector<plist_wrapper*>& postings_lists,
+  double evaluate_pivot(std::vector<plist_wrapper*>& postings_lists,
                         std::priority_queue<doc_score,
                         std::vector<doc_score>,
                         std::greater<doc_score>>& heap,
-                        uint64_t potential_score,
-                        const uint64_t threshold,
+                        double potential_score,
+                        const double threshold,
                         const size_t k) {
 
     auto doc_id = postings_lists[0]->cur.docid(); //Pivot ID
-    uint64_t doc_score = 0;
+    double doc_score = 0;
+    double W_d = ranker->doc_length(doc_id);
     auto itr = postings_lists.begin();
     auto end = postings_lists.end();
     // Iterate postings 
     while (itr != end) {
       // Score the document if
       if ((*itr)->cur.docid() == doc_id) {
-        uint64_t contrib = (*itr)->cur.freq(); // Freqs store precomputed score
+        double contrib = ranker->calculate_docscore((*itr)->cur.freq(),
+                                                   (*itr)->f_t,
+                                                   W_d);
         doc_score += contrib;
         potential_score += contrib;
         potential_score -= (*itr)->list_max_score; //Incremental refinement
@@ -309,20 +327,21 @@ public:
     if (heap.size()) {
       return heap.top().score;
     }
-    return 0;
+    return 0.0f;
   }
 
   // Block-Max pivot evaluation
-  uint64_t evaluate_pivot_bmw(std::vector<plist_wrapper*>& postings_lists,
+  double evaluate_pivot_bmw(std::vector<plist_wrapper*>& postings_lists,
                         std::priority_queue<doc_score,
                         std::vector<doc_score>,
                         std::greater<doc_score>>& heap,
-                        uint64_t potential_score,
-                        const uint64_t threshold,
+                        double potential_score,
+                        const double threshold,
                         const size_t k) {
 
     uint64_t doc_id = postings_lists[0]->cur.docid(); // pivot
-    uint64_t doc_score = 0;
+    double doc_score = 0;
+    double W_d = ranker->doc_length(doc_id);
     auto itr = postings_lists.begin();
     auto end = postings_lists.end();
     
@@ -330,7 +349,9 @@ public:
     while (itr != end) {
       // If we have the pivot, contribute the score
       if ((*itr)->cur.docid() == doc_id) {
-        uint64_t contrib = (*itr)->cur.freq();
+        double contrib = ranker->calculate_docscore((*itr)->cur.freq(),
+                                                   (*itr)->f_t,
+                                                   W_d);
         doc_score += contrib;
         potential_score += contrib;
         // Differs from WAND version as we use BM scores for estimation
@@ -369,7 +390,7 @@ public:
     if (heap.size()) {
       return heap.top().score;
     }
-    return 0;
+    return 0.0f;
   }
 
 
@@ -382,7 +403,7 @@ public:
                         std::greater<doc_score>> score_heap;
 
     // init list processing 
-    uint64_t threshold = 0;
+    double threshold = 0.0f;
 
     // Initial Sort, get the pivot and its potential score
     sort_list_by_id(postings_lists);
@@ -429,7 +450,7 @@ public:
                         std::greater<doc_score>> score_heap;
 
     // init list processing 
-    uint64_t threshold = 0;
+    double threshold = 0.0f;
     // Initial Sort, get the pivot and its potential score
     sort_list_by_id(postings_lists);
     size_t initial = postings_lists.size();
@@ -478,7 +499,7 @@ public:
                         std::greater<doc_score>> score_heap;
     
     // init list processing , grab first pivot and potential score
-    uint64_t threshold = 0;
+    double threshold = 0;
     sort_list_by_id(postings_lists);
     auto pivot_and_score = determine_candidate(postings_lists, threshold);
     auto pivot_list = std::get<0>(pivot_and_score);
@@ -489,8 +510,8 @@ public:
       // Second level candidate check
       auto candidate_and_score = potential_candidate(postings_lists, pivot_list,
                                           threshold, candidate_id);
-      bool candidate = std::get<0>(candidate_and_score);
-      uint64_t potential_score = std::get<1>(candidate_and_score);
+      auto candidate = std::get<0>(candidate_and_score);
+      auto potential_score = std::get<1>(candidate_and_score);
       // If the document is still a candidate from BM scores
       if (candidate) {
         // If lists are aligned for pivot, score the doc
@@ -534,7 +555,7 @@ public:
                         std::greater<doc_score>> score_heap;
     
     // init list processing , grab first pivot and potential score
-    uint64_t threshold = 0;
+    double threshold = 0;
     sort_list_by_id(postings_lists);
     auto pivot_and_score = determine_candidate(postings_lists);
     auto pivot_list = std::get<0>(pivot_and_score);
@@ -547,8 +568,8 @@ public:
       // Second level candidate check
       auto candidate_and_score = potential_candidate(postings_lists, pivot_list,
                                           threshold, candidate_id);
-      bool candidate = std::get<0>(candidate_and_score);
-      uint64_t potential_score = std::get<1>(candidate_and_score);
+      auto candidate = std::get<0>(candidate_and_score);
+      auto potential_score = std::get<1>(candidate_and_score);
       // If the document is still a candidate from BM scores
       if (candidate) {
         // If lists are aligned for pivot, score the doc
