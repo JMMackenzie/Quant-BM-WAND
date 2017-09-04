@@ -26,6 +26,6 @@ ADD_LIBRARY(fastpfor_lib STATIC external/fastpfor/src/bitpacking.cpp
                                 external/fastpfor/src/simdunalignedbitpacking.cpp
                                 external/fastpfor/src/simdbitpacking.cpp)
 
-  ADD_EXECUTABLE(wand_search src/wand_search.cpp src/compress_qmx.cpp)
-  TARGET_LINK_LIBRARIES(wand_search sdsl divsufsort divsufsort64 pthread fastpfor_lib)
+  ADD_EXECUTABLE(search_index src/search_index.cpp src/compress_qmx.cpp)
+  TARGET_LINK_LIBRARIES(search_index sdsl divsufsort divsufsort64 pthread fastpfor_lib)
 

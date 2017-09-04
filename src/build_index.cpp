@@ -1,10 +1,15 @@
 #include <iostream>
+
 #include "ant_param_block.h"
 #include "search_engine.h"
 #include "search_engine_btree_leaf.h"
 #include "btree_iterator.h"
 #include "memory.h"
+
+#include "include/generic_rank.hpp"
+#include "include/bm25.hpp"
 #include "include/impact.hpp"
+
 #include "sdsl/int_vector_buffer.hpp"
 #include "include/block_postings_list.hpp"
 #include "include/util.hpp"
@@ -56,20 +61,17 @@ int main(int argc, char **argv)
 
   // For reference (later, for a user), write out which index type this is
   std::ofstream index_file_output(index_type_file);
-  index_file_output << s_index_type;
+  index_file_output << s_index_type << std::endl;
 
   // load stuff
   ANT_memory memory;
   ANT_search_engine search_engine(&memory);
   search_engine.open(params.index_filename);
 
-  if (!search_engine.quantized()) {
-    std::cerr << "Must use a quantized index for conversion" << std::endl;
-    exit(EXIT_FAILURE);
-  }
-
-  // Keep track of term ordering
+ // Keep track of term ordering
   unordered_map<string, uint64_t> map;
+
+  std::vector<uint64_t> doclen_vector;
 
   std::cout << "Writing global info to " << global_info_file << "."
             << std::endl;
@@ -98,13 +100,15 @@ int main(int argc, char **argv)
     // Shift all IDs from ATIRE by 2 so \0 and \1 are free.
     uniq_terms += 2; 
 
+    
     double mean_length;
     auto lengths = search_engine.get_document_lengths(&mean_length);
     {
       for (long long i = 0; i < search_engine.document_count(); i++)
       {
         doclen_out << lengths[i] << std::endl;
-        of_doc_names << filenames[i] << std::endl;;
+        of_doc_names << filenames[i] << std::endl;
+        doclen_vector.push_back(lengths[i]);
       }
     }
 
@@ -130,6 +134,24 @@ int main(int argc, char **argv)
     }
   }
 
+  // ranker is a unique_ptr to the ranker type
+  std::unique_ptr<generic_rank> ranker;
+  // Use quant ranker
+  
+  if (search_engine.quantized()) {
+    ranker = std::unique_ptr<generic_rank>(new rank_impact); 
+    std::cerr << "You provided a pre-quantized ATIRE index, so I am building" 
+              << " a quantized index." << std::endl;
+    index_file_output << STRING_QUANT << std::endl; // keep track of index type
+  }
+  else {
+    ranker = std::unique_ptr<generic_rank>(new rank_bm25(doclen_vector, search_engine.term_count()));
+    std::cerr << "You provided a frequency ATIRE index, so I am building" 
+              << " a frequency index." << std::endl;
+    index_file_output << STRING_FREQ << std::endl; // keep track of index type
+
+  }
+
   // write inverted files
   {
     using plist_type = block_postings_list<128>;
@@ -149,6 +171,7 @@ int main(int argc, char **argv)
     std::cerr << "Generating postings lists ..." << std::endl;
 
     m_postings_lists.resize(n_terms);
+
 
     ANT_search_engine_btree_leaf leaf;
     ANT_btree_iterator iter(&search_engine);
@@ -222,7 +245,7 @@ int main(int argc, char **argv)
       // The above will result in sorted by impact first, so re-sort by docid
       std::sort(std::begin(post), std::end(post));
 
-      plist_type pl(post, index_format);
+      plist_type pl(ranker, post, index_format);
       sdsl::serialize(pl, ofs);
 
     }

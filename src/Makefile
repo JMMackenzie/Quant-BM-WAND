@@ -15,7 +15,7 @@ LIBPATH=-L $(SDSLPREFIX)/lib/ -L$(DIVSUF)/lib
 LIBS= $(patsubst %, -l%, $(DEPENDENCIES)) -lsdsl -ldivsufsort ../build/libfastpfor_lib.a
 
 all:
-	$(CXX) $(CXXFLAGS) -Wno-write-strings -O3 -msse4.2 -std=c++11 mk_impact_idx.cpp compress_qmx_d4.cpp compress_qmx.cpp -o mk_impact_idx $(INCPATH) $(LIBPATH) $(LIBS) $(CPPLDFLAGS) $(SOURCES_OBJECTS) $(EXTRA_OBJS) $(LDFLAGS) $(MINUS_D)
+	$(CXX) $(CXXFLAGS) -Wno-write-strings -O3 -msse4.2 -std=c++11 build_index.cpp compress_qmx_d4.cpp compress_qmx.cpp -o build_index $(INCPATH) $(LIBPATH) $(LIBS) $(CPPLDFLAGS) $(SOURCES_OBJECTS) $(EXTRA_OBJS) $(LDFLAGS) $(MINUS_D)
 
 clean:
-	rm -f mk_impact_idx *~
+	rm -f build_index *~

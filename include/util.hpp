@@ -14,6 +14,12 @@
 #include <unistd.h>
 
 
+// Postings list type
+enum postings_form {
+  FREQUENCY,
+  QUANTIZED
+};
+
 enum index_form {
   WAND,
   BMW
@@ -32,7 +38,8 @@ const std::string STRING_WAND = "WAND";
 const std::string STRING_BMW = "BMW";
 const std::string DICT_FILENAME = "dict.txt";
 const std::string DOCNAMES_FILENAME = "doc_names.txt";
-
+const std::string STRING_FREQ = "FREQUENCY";
+const std::string STRING_QUANT = "QUANTIZED";
 
 // Knuth trick for comparing floating numbers
 // check if a and b are equal with respect to the defined tolerance epsilon

@@ -35,15 +35,14 @@ then
   echo "ERROR: ATIRE build failed!"
   exit -1
 fi
-echo "Make the index extractor"
 cd ../../src
 make
 if [ $? -ne 0 ];
 then
-  echo "Index extractor build failed!"
+  echo "Extractor build failed!"
   exit -1
 fi
 cd ..
-mv src/mk_impact_idx bin/mk_impact_idx
-mv build/wand_search bin/wand_search
+mv src/build_index bin/build_index
+mv build/search_index bin/search_index
 echo "Binaries are now in the bin directory"

@@ -32,15 +32,18 @@ COLL_FILES=$(find $COLLECTION_DIR -mindepth 1 -maxdepth 2 -type d -name 'en*' -p
 # used quantized BM25. Note that -iscrub:un is used instead of :an (as used in Gov2).
 $ATIRE_BIN -N1000000 -sa $COLLECTION_TYPE -iscrub:un -ts -kt -QBM25 -q ${COLL_FILES[@]}
 
+# Important: To build the frequency version, use the following line instead of the above line
+# $ATIRE_BIN -N1000000 -sa $COLLECTION_TYPE -iscrub:un -ts -kt ${COLL_FILES[@]}
+
 # Build WAND index
-./bin/mk_impact_idx -findex index.aspt wand-cw09b WAND
+./bin/build_index -findex index.aspt wand-cw09b-quant WAND
 
 # Build BMW index
-./bin/mk_impact_idx -findex index.aspt bmw-cw09b BMW
+./bin/build_index -findex index.aspt bmw-cw09b-quant BMW
 
 # Run WAND queries for top-1000
-./bin/wand_search -q ir-repo/cw09b.qry -k 1000 -z 1.0 -c wand-cw09b -o wand-k_1000-t_1.0-cw09b
+./bin/search_index -q ir-repo/cw09b.qry -k 1000 -z 1.0 -c wand-cw09b-quant -t OR -o wand
 
 # Run BMW queries for top-1000
-./bin/wand_search -q ir-repo/cw09b.qry -k 1000 -z 1.0 -c bmw-cw09b -o bmw-k_1000-t_1.0-cw09b
+./bin/search_index -q ir-repo/cw09b.qry -k 1000 -z 1.0 -c bmw-cw09b-quant -t OR -o bmw
 
