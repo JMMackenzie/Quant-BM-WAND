@@ -76,4 +76,11 @@ Updates
 * 24/5/2017: Added support for conjunctive Wand/Block-Max AND querying. Please
 note that BM-AND is currently untested.
 * 26/5/2017: Fix added for Block-Max AND. BMA tested and working as expected.
-* 04/9/2017: Support added for frequency indexes
+* 04/9/2017: Support added for frequency indexes, so pre-quantization is not required (that is, we calculate our ranking function at query processing time).
+
+Wish List/To Do
+===============
+* In the original [WandBL](https://github.com/jsc/WANDbl) repo, the index is built using Indri as the initial indexer. This repo has the tools and code
+necessary to use Indri to build consumable indexes for this particular repo. The aim is to integrate this code here on a rainy day, but would also require
+the quantizer to be built in here too. 
+
