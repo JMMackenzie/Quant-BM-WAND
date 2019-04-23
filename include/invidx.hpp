@@ -324,7 +324,7 @@ public:
     }
     // resort
     sort_list_by_id(postings_lists);
-    if (heap.size()) {
+    if (heap.size() == k) {
       return heap.top().score;
     }
     return 0.0f;
@@ -387,7 +387,7 @@ public:
     }
     // resort
     sort_list_by_id(postings_lists);
-    if (heap.size()) {
+    if (heap.size() == k) {
       return heap.top().score;
     }
     return 0.0f;
